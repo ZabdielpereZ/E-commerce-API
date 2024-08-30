@@ -57,11 +57,14 @@ class Orders(Base):
     id: Mapped[int] = mapped_column(primary_key= True)
     order_data: Mapped[date] = mapped_column(db.Date, nullable= False)
     delivery_date: Mapped[date] = mapped_column(db.Date)
+    items: Mapped[str] = mapped_column()
     customer_id: Mapped[int] = mapped_column(db.ForeignKey('customer.id'))
 
+    # Create a one-many relationship to Orders tables
     customer: Mapped['Customer'] = db.relationship(back_populates= 'orders')
 
-    products: Mapped[List['Customer']] = db.relationship(secondary= 'order_products')
+    # Create a many-many relationship to products through an  association table order_products
+    products: Mapped[List['Products']] = db.relationship(secondary= 'order_products')
 
 class Products(Base):
     __tablename__ = "products"
@@ -85,14 +88,17 @@ class CustomerSchema(ma.Schema):
 
 class OrderSchema(ma.Schema):
     id = fields.Integer(required= False)
-    order_date = fields.Date(required= False)
+    order_date = fields.Date(required= True)
     delivery_date = fields.Date()
     customer_id = fields.Integer(required= True)
+
+    class meta:
+        fields = ('id', 'order_date', 'delivery_date', 'customer_id', 'items') # items will be a list of product id's associated with on order 
 
 class productsSchema(ma.Schema):
     id = fields.Integer(required= False)
     product_name = fields.String(required= True)
-    price = fields.Float(nullable= False)
+    price = fields.Float(required= True)
     availability = fields.Boolean()
     
     class Meta:
@@ -107,22 +113,32 @@ orders_schema = OrderSchema(many= True)
 product_schema = productsSchema()
 products_schema = productsSchema(many= True)
 
+# testing works
 @app.route('/')
 def home():
     return "Welcome to this wild ride on the Flask SQLAlchemy rollercoaster!"
+#================= CRUD Operations ====================#
+'''
+Create (post)
+Retrieve (get)
+Update (put)
+Delete (DELETE)
 
+'''
 #================= API Endpoints (GET, POST, PUT, DELETE) Customer Interactions =================#
-
-# get all customer using a GET method
+# DONE
+# get all customers using a GET method
 @app.route("/customers", methods= ['GET'])
 def get_customers():
-    query = select(Customer)
-    result = db.session.execute(query).scalars()
+    query = select(Customer) # SELECT * FROM customers
+    result = db.session.execute(query).scalars() # Execute our query and convert each row object into a scalar object (python usable) 
 
-    customers = result.all()
+    customers = result.all() # pack all objects into a list 
 
     return customers_schema.jsonify(customers)
 
+# DONE
+# get a single customer using a GET method 
 @app.route('/customers/<int:id>', methods=['GET'])
 def get_customer(id):
     query = select(Customer).where(Customer.id == id)
@@ -131,6 +147,8 @@ def get_customer(id):
         return jsonify({"message": "Customer not found"}), 404
     return customer_schema.jsonify(result)
 
+# DONE
+# ADD a new customer with POST method
 @app.route('/customers', methods=['POST'])
 def add_customer():
     try:
@@ -144,7 +162,8 @@ def add_customer():
 
     return jsonify({'Message': "New customer added successfully!"}), 201
 
-# Updated customer with PUT request
+# DONE
+# Updated customer with PUT method
 @app.route('/customers/<int:id>', methods= ['PUT'])
 def update_customer(id):
     query = select(Customer).where(Customer.id == id)
@@ -164,7 +183,8 @@ def update_customer(id):
     db.session.commit()
     return jsonify({'message': "Customer details have been updated"})
 
-# Delete a customer with a DELETE request
+# DONE
+# Delete a customer with a DELETE method
 @app.route("/customers/<int:id>", methods= ['DELETE'])
 def delete_customer(id):
     query = delete(Customer).where(Customer.id == id) # DELETE FROM customer WHERE id == id
@@ -178,8 +198,8 @@ def delete_customer(id):
     return jsonify({"Messgae": "Customer sucessfully deleted! Wow!"}), 200
 
 #============= Product Interactions =================#
-
-# Route to create/add new products with a POST request
+# Done
+# Route to create/add new products with a POST method
 @app.route("/products", methods= ['POST'])
 def add_product():
     try:
@@ -193,6 +213,8 @@ def add_product():
 
     return jsonify({"Message": "New product added successfully!"}), 201
 
+# DONE
+# Get all products using a GET method
 @app.route("/products", methods= ['GET'])
 def get_products():
     query = select(Products)
@@ -201,6 +223,51 @@ def get_products():
     products = result.all()
 
     return products_schema.jsonify(products)
+
+# DONE
+# Route to get product of single id using GET method
+@app.route('/products/<int:id>', methods=['GET'])
+def get_product(id):
+    query = select(Products).where(Products.id == id)
+    result = db.session.execute(query).scalars().first()  # .first() simple grabs the first object from the data returned from execute()
+    if result is None:
+        return jsonify({"message": "Product not found"}), 404
+    return product_schema.jsonify(result)
+
+# DONE 
+# Update product details with PUT method
+@app.route('/products/<int:id>', methods= ['PUT'])
+def update_products(id):
+    query = select(Products).where(Products.id == id)
+    result = db.session.execute(query).scalar()
+    if result is None:
+        return jsonify({"message": "Product not found"}), 404
+
+    product = result
+    try:
+        product_data = product_schema.load(request.json)
+    except ValidationError as e:
+        return jsonify(e.messages), 400
+    
+    for field, value in product_data.items():
+        setattr(product, field, value)
+
+    db.session.commit()
+    return jsonify({'message': "Product details have been updated"})
+
+# DONE
+# Delete a product with a DELETE method
+@app.route("/products/<int:id>", methods= ['DELETE'])
+def delete_product(id):
+    query = delete(Products).where(Products.id == id) # DELETE FROM customer WHERE id == id
+
+    result = db.session.execute(query)
+
+    if result.rowcount == 0:
+        return jsonify({"Message": "Product not found!"}), 404
+    
+    db.session.commit()
+    return jsonify({"Message": "Product sucessfully deleted! Wow!"}), 200
 
 #============= Order Interactions ===============#
 
@@ -223,6 +290,7 @@ def add_order():
     db.session.commit()
     return jsonify({"Message": "New order placed!"}), 201
 
+# NOT DONE
 # Get items in an order by order ID
 @app.route("/order_items/<int:id>", methods= ['GET'])
 def order_items(id):
