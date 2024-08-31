@@ -22,7 +22,7 @@ from sqlalchemy import select, delete
 
 app = Flask(__name__) # creating an instance of the Flask class for our app to use
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:%23Fuckshit26@localhost/commerce'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:%23Fuckshit26@localhost/ecom_2'
 
 class Base(DeclarativeBase):
     pass
@@ -44,20 +44,19 @@ class Customer(Base):
     # Create a one-many relationship to Orders table
     orders: Mapped[List["Orders"]] = db.relationship(back_populates= 'customer') # back populates ensures that both ends of this relationship have access to this information
 
-    order_products = db.Table(
-    "order_products",
-    Base.metadata, # allows this table to locate foreign keys from the Base class
-    db.Column('order_id', db.ForeignKey('orders.id'), primary_key= True),
-    db.Column('product_id', db.ForeignKey('products.id'), primary_key= True)
-    )
+order_products = db.Table(
+"order_products",
+Base.metadata, # allows this table to locate foreign keys from the Base class
+db.Column('order_id', db.ForeignKey('orders.id'), primary_key= True),
+db.Column('product_id', db.ForeignKey('products.id'), primary_key= True)
+)
 
 class Orders(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(primary_key= True)
-    order_data: Mapped[date] = mapped_column(db.Date, nullable= False)
+    order_date: Mapped[date] = mapped_column(db.Date, nullable= False)
     delivery_date: Mapped[date] = mapped_column(db.Date)
-    items: Mapped[str] = mapped_column()
     customer_id: Mapped[int] = mapped_column(db.ForeignKey('customer.id'))
 
     # Create a one-many relationship to Orders tables
@@ -91,8 +90,8 @@ class OrderSchema(ma.Schema):
     order_date = fields.Date(required= True)
     delivery_date = fields.Date()
     customer_id = fields.Integer(required= True)
-
-    class meta:
+    items = []
+    class Meta:
         fields = ('id', 'order_date', 'delivery_date', 'customer_id', 'items') # items will be a list of product id's associated with on order 
 
 class productsSchema(ma.Schema):
@@ -195,10 +194,10 @@ def delete_customer(id):
         return jsonify({"Message": "Customer not found!"}), 404
     
     db.session.commit()
-    return jsonify({"Messgae": "Customer sucessfully deleted! Wow!"}), 200
+    return jsonify({"Message": "Customer sucessfully deleted! Wow!"}), 200
 
 #============= Product Interactions =================#
-# Done
+# DONE
 # Route to create/add new products with a POST method
 @app.route("/products", methods= ['POST'])
 def add_product():
@@ -207,7 +206,7 @@ def add_product():
     except ValidationError as e:
         return jsonify(e.messages), 400
     
-    new_product = Products(product_name= product_data['product_name'], price= product_data['price'])
+    new_product = Products(product_name= product_data['product_name'], price= product_data['price'], availability= product_data['availability'])
     db.session.add(new_product)
     db.session.commit()
 
@@ -270,35 +269,66 @@ def delete_product(id):
     return jsonify({"Message": "Product sucessfully deleted! Wow!"}), 200
 
 #============= Order Interactions ===============#
-
+# DONE
 # Create/place a new order with a POST request
 @app.route("/orders", methods= ['POST'])
-def add_order():
+def add_orders():
+    try:
+        orders_data = order_schema.load(request.json)
+    except ValidationError as e:
+        return jsonify(e.messages), 400
+    
+    new_orders = Orders(order_date= orders_data['order_date'], delivery_date= orders_data['delivery_date'], customer_id= orders_data['customer_id'])
+    db.session.add(new_orders)
+    db.session.commit()
+
+    return jsonify({"Message": "New orders added successfully!"}), 201
+
+# DONE
+# Route to get all 
+@app.route("/orders", methods= ['GET'])
+def get_orders():
+    query = select(Orders)
+    result = db.session.execute(query).scalars()
+
+    orders = result.all()
+    
+    return orders_schema.jsonify(orders)
+
+# DONE
+# Get items in an order by order ID
+@app.route('/orders/<int:id>', methods=['GET'])
+def get_order(id):
+    query = select(Orders).where(Orders.id == id)
+    result = db.session.execute(query).scalars().first()  # .first() simple grabs the first object from the data returned from execute()
+    if result is None:
+        return jsonify({"message": "Order not found"}), 404
+    return order_schema.jsonify(result)
+
+# DONE
+# Update order details with PUT request
+@app.route('/orders/<int:id>', methods= ['PUT'])
+def update_orders(id):
+    query = select(Orders).where(Orders.id == id)
+    result = db.session.execute(query).scalar()
+    if result is None:
+        return jsonify({"message": "Order not found"}), 404
+
+    order = result
     try:
         order_data = order_schema.load(request.json)
     except ValidationError as e:
         return jsonify(e.messages), 400
     
-    new_order = Orders(order_date= date.today(), customer_id= order_data['customer_id'])
+    for field, value in order_data.items():
+        setattr(order, field, value)
 
-    for item_id in order_data['items']:
-        query = select(Products).where(Products.id == item_id)
-        item = db.session.execute(query).scalar()
-        new_order.products.append(item)
-
-    db.session.add(new_order)
     db.session.commit()
-    return jsonify({"Message": "New order placed!"}), 201
+    return jsonify({'message': "Order details have been updated"})
 
-# NOT DONE
-# Get items in an order by order ID
-@app.route("/order_items/<int:id>", methods= ['GET'])
-def order_items(id):
-    query = select(Orders).where(Orders.id == id)
-    order = db.session.execute(query).scalar()
-
-    return products_schema.jsonify(order.products)
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()  # create tables if they don't exist yet
     app.run(debug= True)
